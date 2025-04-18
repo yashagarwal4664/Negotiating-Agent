@@ -1,15 +1,29 @@
 import os
 import re
-import random
 from dotenv import load_dotenv
+from typing import List, Optional
+
 from langchain_openai import ChatOpenAI
 from langchain.prompts import PromptTemplate
 from langchain.memory import ConversationBufferMemory
 from langchain_core.runnables.history import RunnableWithMessageHistory
 
-# —————————————
-# Custom Memory Class
-# —————————————
+# Load environment variables
+load_dotenv()
+api_key = os.getenv("OPENAI_API_KEY")
+
+# Simple number extractor
+def extract_offer(text: str) -> Optional[int]:
+    """
+    Pulls all standalone integers out of the text and returns the largest one.
+    Returns None if no number is found.
+    """
+    matches = re.findall(r"\b\d+\b", text)
+    if not matches:
+        return None
+    return max(int(m) for m in matches)
+
+# Custom ConversationBufferMemory that implements both `messages` and `add_messages`
 class CustomConversationBufferMemory(ConversationBufferMemory):
     @property
     def messages(self):
@@ -19,7 +33,7 @@ class CustomConversationBufferMemory(ConversationBufferMemory):
             return [msg for msg in self.buffer.split("\n") if msg]
         return self.buffer
 
-    def add_messages(self, messages):
+    def add_messages(self, messages: List):
         if hasattr(self, "chat_memory") and hasattr(self.chat_memory, "add_messages"):
             self.chat_memory.add_messages(messages)
         else:
@@ -32,22 +46,16 @@ class CustomConversationBufferMemory(ConversationBufferMemory):
             else:
                 self.buffer = messages
 
-# —————————————
-# Load API Key & Init LLM
-# —————————————
-load_dotenv()
-api_key = os.getenv("OPENAI_API_KEY")
+# LLM Initialization
 llm = ChatOpenAI(
     model="llama-3.1-70b-instruct",
-    openai_api_base=os.getenv("LITELLM_API_BASE", "https://api.ai.it.ufl.edu"),
+    openai_api_base="https://api.ai.it.ufl.edu",
     openai_api_key=api_key,
-    temperature=0.6,
+    temperature=0.6
 )
 
-# —————————————
-# Core Template (static parts)
-# —————————————
-static_template = """
+# Negotiation prompt template
+negotiation_template = """
 # Human-Like Negotiation Agent: Employer Perspective
 
 ## Agent Identity
@@ -115,85 +123,50 @@ You are an AI hiring manager designed to conduct negotiations in a human-like ma
 
 ## Response Format
 Respond in 2–4 short, human-like sentences. Keep tone friendly, direct, and avoid corporate jargon. Do not reintroduce topics already discussed. Always reference the latest input in the context of previous messages.
+
+Candidate says: "{message}"
+
+## Your Response:
 """
 
+prompt = PromptTemplate.from_template(negotiation_template)
 
-def extract_offer(text: str) -> int | None:
-    # simple: find all numbers (commas OK), pick the largest
-    matches = re.findall(r"\d[\d,]*", text)
-    if not matches:
-        return None
-    # remove commas & convert
-    nums = [int(m.replace(",", "")) for m in matches]
-    return max(nums)
-
-
-def build_system_prompt(history: list[str], turn: int, subj_limit: int) -> str:
-    hist_text = "\n".join(history[-6:])  # last 6 lines
-    return (
-        f"{static_template}\n"
-        f"## Dynamic Subjective Limit\n"
-        f"- Current subjective limit (do NOT reveal): ${subj_limit:,}\n\n"
-        f"## Conversation History (most recent at bottom)\n"
-        f"{hist_text}\n\n"
-        f"Candidate says: \"{history[-1]}\"\n\n"
-        f"## Your Response:\n"
-    )
-
-
+# Memory Factory using the custom memory class
 def get_memory(session_id: str):
     return CustomConversationBufferMemory(
-        memory_key="history", return_messages=False, input_key="message"
+        memory_key="history",
+        return_messages=True,
+        input_key="message"
     )
 
-template = PromptTemplate(input_variables=["system_prompt"], template="{system_prompt}")
-chain = template | llm
+# Chain with memory support
+chain = prompt | llm
 conversation = RunnableWithMessageHistory(
     runnable=chain,
     get_session_history=get_memory,
-    input_messages_key="system_prompt",
-    history_messages_key="history",
+    input_messages_key="message",
+    history_messages_key="history"
 )
 
-
-print("Negotiation Agent Active! (type 'exit' to quit)\n")
-
-
-TARGET = 120_000
-RESERVATION = 135_000
-subj_limit = random.randint(TARGET, RESERVATION)
-turn_counter = 0
-history: list[str] = []
+# CLI loop for negotiation
+print("\nNegotiation Agent Active! Type your message as the candidate.\nType 'exit' to stop.\n")
+session_id = "negotiation-session-001"
 
 while True:
-    user_input = input("Candidate: ").strip()
-    if user_input.lower() in ("exit", "quit"):
+    user_input = input("Candidate: ")
+    if user_input.lower() in ["exit", "quit"]:
         print("Session ended.")
         break
 
-    history.append(user_input)
-    turn_counter += 1
+    try:
+        # (Optionally) extract an offer number if you need it:
+        offer_value = extract_offer(user_input)
+        # print(f"[debug] extracted offer = {offer_value}")
 
-
-    if turn_counter == 1:
-        offer = extract_offer(user_input)
-        if offer:
-            
-            subj_limit = int((offer + RESERVATION) / 2)
-
-    
-    sys_prompt = build_system_prompt(history, turn_counter, subj_limit)
-
-    
-    resp = conversation.invoke(
-        {"system_prompt": sys_prompt},
-        config={"configurable": {"session_id": "negotiation-session-001"}},
-    )
-
-   
-    reply = resp.content.strip()
-    print("\nEmployer Agent:", reply, "\n")
-    history.append(reply)
-
-    
-
+        result = conversation.invoke(
+            {"message": user_input},
+            config={"configurable": {"session_id": session_id}}
+        )
+        print("\nEmployer Agent:", result.content, "\n")
+    except Exception as e:
+        print("⚠️ Error:", str(e))
