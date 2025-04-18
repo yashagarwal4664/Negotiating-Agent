@@ -1,30 +1,28 @@
 import os
+import re
+import random
 from dotenv import load_dotenv
 from langchain_openai import ChatOpenAI
 from langchain.prompts import PromptTemplate
 from langchain.memory import ConversationBufferMemory
 from langchain_core.runnables.history import RunnableWithMessageHistory
 
-# Custom ConversationBufferMemory that implements both `messages` and `add_messages`
+# —————————————
+# Custom Memory Class
+# —————————————
 class CustomConversationBufferMemory(ConversationBufferMemory):
     @property
     def messages(self):
-        # Return messages if chat_memory exists and has messages attribute.
         if hasattr(self, "chat_memory") and hasattr(self.chat_memory, "messages"):
             return self.chat_memory.messages
-        # Otherwise, process the internal buffer.
         if isinstance(self.buffer, str):
             return [msg for msg in self.buffer.split("\n") if msg]
-        # Fallback: assume the buffer is already a list.
         return self.buffer
 
     def add_messages(self, messages):
-        # If an internal chat_memory exists and supports add_messages, delegate to it.
         if hasattr(self, "chat_memory") and hasattr(self.chat_memory, "add_messages"):
             self.chat_memory.add_messages(messages)
         else:
-            # Otherwise update the buffer manually.
-            # Here we assume that messages is a list of objects that are either strings or have a "content" attribute.
             if isinstance(self.buffer, str):
                 for message in messages:
                     text = message if isinstance(message, str) else getattr(message, "content", str(message))
@@ -32,23 +30,24 @@ class CustomConversationBufferMemory(ConversationBufferMemory):
             elif isinstance(self.buffer, list):
                 self.buffer.extend(messages)
             else:
-                # If buffer is in an unexpected format, simply overwrite it.
                 self.buffer = messages
 
-# Load environment variables
+# —————————————
+# Load API Key & Init LLM
+# —————————————
 load_dotenv()
 api_key = os.getenv("OPENAI_API_KEY")
-
-# LLM Initialization
 llm = ChatOpenAI(
     model="llama-3.1-70b-instruct",
-    openai_api_base="https://api.ai.it.ufl.edu",
+    openai_api_base=os.getenv("LITELLM_API_BASE", "https://api.ai.it.ufl.edu"),
     openai_api_key=api_key,
-    temperature=0.6
+    temperature=0.6,
 )
 
-# Negotiation prompt template
-negotiation_template = """
+# —————————————
+# Core Template (static parts)
+# —————————————
+static_template = """
 # Human-Like Negotiation Agent: Employer Perspective
 
 ## Agent Identity
@@ -105,6 +104,7 @@ You are an AI hiring manager designed to conduct negotiations in a human-like ma
 - If the candidate accepts or is close to accepting, finalize the offer clearly and stop hedging.
 - If the candidate makes a “deal-breaking” condition, evaluate and clearly respond whether it's acceptable or not.
 - If the candidate says they’re walking away, ask a final clarifying question or give your best and final offer.
+
 ## Final Offer & Escalation Rules
 - If candidate says they will sign now for a specific amount, evaluate feasibility and either accept or clearly decline with reasoning. Do not deflect.
 - After 2 counteroffers, either accept, reject, or give a final package proposal. Avoid looping back to earlier offers.
@@ -115,48 +115,85 @@ You are an AI hiring manager designed to conduct negotiations in a human-like ma
 
 ## Response Format
 Respond in 2–4 short, human-like sentences. Keep tone friendly, direct, and avoid corporate jargon. Do not reintroduce topics already discussed. Always reference the latest input in the context of previous messages.
-
-Candidate says: "{message}"
-
-## Your Response:
 """
 
 
+def extract_offer(text: str) -> int | None:
+    # simple: find all numbers (commas OK), pick the largest
+    matches = re.findall(r"\d[\d,]*", text)
+    if not matches:
+        return None
+    # remove commas & convert
+    nums = [int(m.replace(",", "")) for m in matches]
+    return max(nums)
 
-prompt = PromptTemplate.from_template(negotiation_template)
 
-# Memory Factory using the custom memory class
-def get_memory(session_id: str):
-    return CustomConversationBufferMemory(
-        memory_key="history",
-        return_messages=True,
-        input_key="message"
+def build_system_prompt(history: list[str], turn: int, subj_limit: int) -> str:
+    hist_text = "\n".join(history[-6:])  # last 6 lines
+    return (
+        f"{static_template}\n"
+        f"## Dynamic Subjective Limit\n"
+        f"- Current subjective limit (do NOT reveal): ${subj_limit:,}\n\n"
+        f"## Conversation History (most recent at bottom)\n"
+        f"{hist_text}\n\n"
+        f"Candidate says: \"{history[-1]}\"\n\n"
+        f"## Your Response:\n"
     )
 
-# Chain with memory support
-chain = prompt | llm
+
+def get_memory(session_id: str):
+    return CustomConversationBufferMemory(
+        memory_key="history", return_messages=False, input_key="message"
+    )
+
+template = PromptTemplate(input_variables=["system_prompt"], template="{system_prompt}")
+chain = template | llm
 conversation = RunnableWithMessageHistory(
     runnable=chain,
     get_session_history=get_memory,
-    input_messages_key="message",
-    history_messages_key="history"
+    input_messages_key="system_prompt",
+    history_messages_key="history",
 )
 
-# CLI loop for negotiation
-print("\nNegotiation Agent Active! Type your message as the candidate.\nType 'exit' to stop.\n")
-session_id = "negotiation-session-001"
+
+print("Negotiation Agent Active! (type 'exit' to quit)\n")
+
+
+TARGET = 120_000
+RESERVATION = 135_000
+subj_limit = random.randint(TARGET, RESERVATION)
+turn_counter = 0
+history: list[str] = []
 
 while True:
-    user_input = input("Candidate: ")
-    if user_input.lower() in ["exit", "quit"]:
+    user_input = input("Candidate: ").strip()
+    if user_input.lower() in ("exit", "quit"):
         print("Session ended.")
         break
 
-    try:
-        result = conversation.invoke(
-            {"message": user_input},
-            config={"configurable": {"session_id": session_id}}
-        )
-        print("\nEmployer Agent:", result.content, "\n")
-    except Exception as e:
-        print("⚠️ Error:", str(e))
+    history.append(user_input)
+    turn_counter += 1
+
+
+    if turn_counter == 1:
+        offer = extract_offer(user_input)
+        if offer:
+            
+            subj_limit = int((offer + RESERVATION) / 2)
+
+    
+    sys_prompt = build_system_prompt(history, turn_counter, subj_limit)
+
+    
+    resp = conversation.invoke(
+        {"system_prompt": sys_prompt},
+        config={"configurable": {"session_id": "negotiation-session-001"}},
+    )
+
+   
+    reply = resp.content.strip()
+    print("\nEmployer Agent:", reply, "\n")
+    history.append(reply)
+
+    
+
