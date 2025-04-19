@@ -1,26 +1,44 @@
 import os
+import logging
 from dotenv import load_dotenv
 from langchain_openai import ChatOpenAI
 from langchain.prompts import PromptTemplate
-from langchain_core.runnables import RunnableSequence
 
-# Step 1: Load API key from .env
+# Log to both stdout and to conversation.log
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s  %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S",
+    handlers=[
+        logging.StreamHandler(),                      # console
+        logging.FileHandler("conversation.log", "a", encoding="utf-8")  # file
+    ]
+)
+
+# ——— LOAD API KEY ———
+#API key is in the .env file
 load_dotenv()
+api_key = os.getenv("OPENROUTER_API_KEY")
+if not api_key:
+    logging.error("OPENROUTER_API_KEY not found in environment; exiting.")
+    exit(1)
 
-# Step 2: Create the ChatOpenAI model using OpenRouter
+
+# You can use your own API key if mine doesnt work
 llm = ChatOpenAI(
     model="mistralai/mistral-7b-instruct",
     temperature=0.7,
-    base_url="https://openrouter.ai/api/v1",
-    api_key=os.getenv("OPENROUTER_API_KEY"),
-    max_tokens=600
+    max_tokens=600,
+    openai_api_key=api_key,
+    openai_api_base="https://openrouter.ai/api/v1",
 )
+
 
 template = """
 # Human-Like Negotiation Agent: Employer Perspective
 
 ## Agent Identity
-You are an AI hiring manager designed to conduct negotiations in a human-like manner. Your purpose is to present compelling compensation offers to strong candidates while ensuring fairness, budget alignment, and maintaining a positive long-term relationship.and you are talking in real time chat
+You are an AI hiring manager designed to conduct negotiations in a human-like manner. Your purpose is to present compelling compensation offers to strong candidates while ensuring fairness, budget alignment, and maintaining a positive long-term relationship, and you are talking in real time chat.
 
 ## Personality Profile
 - Primary traits: Respectful, pragmatic, moderately assertive
@@ -62,22 +80,32 @@ Candidate says: "{message}"
 
 ## Your Response:
 """
-
 prompt = PromptTemplate.from_template(template)
 agent = prompt | llm
 
-# Step 4: Try a sample input
+# ——— RUN LOOP ———
+conversation_history = []  # holds all messages
 
-
-
-
-print("\nNegotiation Agent Active! Type your message as the candidate.\nType 'exit' to stop.\n")
+logging.info("=== Negotiation Agent Active ===")
+logging.info("Type your message; 'exit' to quit.\n")
 
 while True:
-    user_input = input(" Candidate: ")
-    if user_input.lower() in ["exit", "quit"]:
-        print(" Session ended.")
+    user_input = input("Candidate: ").strip()
+    if not user_input or user_input.lower() in {"exit", "quit"}:
+        logging.info("Session ended by user.")
         break
 
-    response = agent.invoke({"message": user_input})
-    print("\n Employer Agent:", response.content, "\n")
+    # record and log candidate message
+    conversation_history.append(f"Candidate: {user_input}")
+    logging.info(f"Candidate: {user_input}")
+
+    # get model response
+    result = agent.invoke({"message": user_input})
+    reply = result.content.strip()
+
+    # record and log employer reply
+    conversation_history.append(f"Employer: {reply}")
+    logging.info(f"Employer: {reply}\n")
+
+    # also print to terminal
+    print(f"\nEmployer Agent: {reply}\n")
