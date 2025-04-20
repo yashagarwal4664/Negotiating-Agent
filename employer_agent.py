@@ -140,7 +140,7 @@ Candidate says: "{{message}}"
 """
 prompt = PromptTemplate.from_template(negotiation_template)
 
-# ——— MEMORY FACTORY ———
+
 def get_memory(session_id: str):
     return CustomConversationBufferMemory(
         memory_key="history",
@@ -148,7 +148,7 @@ def get_memory(session_id: str):
         input_key="message"
     )
 
-# ——— CHAIN SETUP ———
+
 chain = prompt | llm
 conversation = RunnableWithMessageHistory(
     runnable=chain,
@@ -157,7 +157,7 @@ conversation = RunnableWithMessageHistory(
     history_messages_key="history"
 )
 
-# ——— CLI LOOP ———
+
 print("\nNegotiation Agent Active! Type your message as the candidate.\nType 'exit' to stop.\n")
 logging.info("=== Negotiation Agent Active ===")
 session_id = "negotiation-session-001"
