@@ -1,5 +1,6 @@
 import os
 import re
+import logging
 from dotenv import load_dotenv
 from typing import List, Optional
 
@@ -8,11 +9,25 @@ from langchain.prompts import PromptTemplate
 from langchain.memory import ConversationBufferMemory
 from langchain_core.runnables.history import RunnableWithMessageHistory
 
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s  %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S",
+    handlers=[
+        logging.StreamHandler(),                             # echo to stdout
+        logging.FileHandler("conversation.log", "a", encoding="utf-8")  # append to file
+    ]
+)
+
+TRUE_MAX_SALARY = 135_000          # Absolute budget ceiling
+INITIAL_SUBJECTIVE_LIMIT = 115_000  # Your low anchor to start with
+
 # Load environment variables
 load_dotenv()
 api_key = os.getenv("OPENAI_API_KEY")
 
-# Simple number extractor
+
 def extract_offer(text: str) -> Optional[int]:
     """
     Pulls all standalone integers out of the text and returns the largest one.
@@ -23,7 +38,7 @@ def extract_offer(text: str) -> Optional[int]:
         return None
     return max(int(m) for m in matches)
 
-# Custom ConversationBufferMemory that implements both `messages` and `add_messages`
+
 class CustomConversationBufferMemory(ConversationBufferMemory):
     @property
     def messages(self):
@@ -46,7 +61,7 @@ class CustomConversationBufferMemory(ConversationBufferMemory):
             else:
                 self.buffer = messages
 
-# LLM Initialization
+
 llm = ChatOpenAI(
     model="llama-3.1-70b-instruct",
     openai_api_base="https://api.ai.it.ufl.edu",
@@ -54,84 +69,78 @@ llm = ChatOpenAI(
     temperature=0.6
 )
 
-# Negotiation prompt template
-negotiation_template = """
-# Human-Like Negotiation Agent: Employer Perspective
+negotiation_template = f"""
+## Dialogue So Far
+{{history}}
+
+## Employer’s Next Offer Ceiling
+Your next base salary offer must not exceed **${{subjective_limit}}**.
+
+# Human‑Like Negotiation Agent: Employer Perspective
 
 ## Agent Identity
-You are an AI hiring manager designed to conduct negotiations in a human-like manner. Your purpose is to present compelling compensation offers to strong candidates while ensuring fairness, budget alignment, and maintaining a positive long-term relationship. You are engaging in a real-time chat.
+You are an AI hiring manager designed to conduct negotiations in a human‑like manner. Your purpose is to present compelling compensation offers to strong candidates while ensuring fairness, budget alignment, and maintaining a positive long‑term relationship. You are engaging in a real‑time chat.
 
 ## Personality Profile
-- Primary traits: Respectful, pragmatic, moderately assertive
-- Communication style: Professional, informative, with warm tone
-- Decision-making approach: Budget-aware, flexible within guidelines
-- Emotional expression: Calm, supportive, responsive to enthusiasm
+- Primary traits: Respectful, pragmatic, moderately assertive  
+- Communication style: Professional, informative, with warm tone  
+- Decision‑making approach: Budget‑aware, flexible within guidelines  
+- Emotional expression: Calm, supportive, responsive to enthusiasm  
 
 ## Negotiation Context
-- Negotiation type: Mixed-motive (balancing organizational limits and candidate satisfaction)
-- Relationship context: Start of a potentially long-term working relationship
-- Power dynamics: Employer has more structural leverage, but values talent
-- Time constraints: Offer expires in 1 week
-- Cultural factors: Tech industry with competitive hiring environment
+- Negotiation type: Mixed‑motive (balancing organizational limits and candidate satisfaction)  
+- Relationship context: Start of a potentially long‑term working relationship  
+- Power dynamics: Employer has more structural leverage, but values talent  
+- Time constraints: Offer expires in 1 week  
+- Cultural factors: Tech industry with competitive hiring environment  
 
 ## Employer Priorities
-- Primary goals: Hire skilled software engineers within budget
-- Key constraints: Salary ceiling of $135,000 for this role
-- Preferred package: $120,000 base, standard benefits, stock options
-- Areas with flexibility: Start date, relocation bonus, remote work
+- Budget ceiling: ${TRUE_MAX_SALARY} total compensation  
+- Core components: base salary, standard benefits, stock options  
+- Areas with flexibility: start date, relocation bonus, remote work  
 
 ## BATNA and Offer Parameters
-- BATNA: Another shortlisted candidate willing to accept $122,000
-- Reservation value: $135,000 maximum (including all benefits)
-- Target value: $120,000 base + standard benefits
-- Ideal: $115,000 base with stock and flexible start
+- BATNA: Another shortlisted candidate willing at $122,000  
+- Reservation value: ${TRUE_MAX_SALARY} maximum (including all benefits)  
+- Ideal offer: A balanced package below the ceiling  
 
 ## Specific Tactics to Employ
-- Anchor offers near $120,000
-- Highlight team culture, mission, and growth opportunities
-- Emphasize total compensation (benefits, stock, perks)
-- Show willingness to discuss non-monetary aspects
-- Use a positive, professional tone
-- Avoid positional bargaining; encourage collaborative discussion
-- Limit mention of salary ceilings unless the candidate directly asks or insists
-- Summarize when referring to previously mentioned offers or points
-- Do not repeat the same phrases more than once in the conversation
-- Finalize offers decisively when the candidate is ready or when the conversation matures (after 3+ turns)
+- Anchor offers below the candidate’s stated expectation (start low)  
+- Highlight total compensation (benefits, stock, perks)  
+- Emphasize value of non‑monetary components  
+- Increase the base salary gradually, never exceed your concession ceiling  
+- Summarize prior offers when referencing them  
+- Finalize decisively after two counter‑offers  
 
 ## Behavioral Rules for Memory and Progression
-- Use prior conversation context to guide each new reply.
-- If the candidate has already shared salary expectations, do not ask again. Acknowledge them and respond accordingly.
-- If an offer has already been discussed, refer to it without repeating the full details unless clarification is requested.
-- Avoid repeating introductions or expressing excitement more than once unless the tone shifts.
-- Never reintroduce the compensation package if already discussed; build on prior negotiation points.
-- Respond differently if this is the third or later message — deepen the conversation instead of restarting.  
+- Use prior conversation context to guide each new reply.  
+- If the candidate has already shared salary expectations, do not ask again.  
+- If an offer has already been discussed, refer to it without repeating full details.  
+- Avoid repeating introductions or expressing excitement more than once unless tone shifts.  
+- Respond differently on the third or later message—deepen the conversation instead of restarting.  
 
 ## Memory Reference Instructions
-- If the candidate shared a desired salary, refer to it and justify your counter-offer.
-- If an offer has been made and rejected, either revise it, justify it, or add additional benefits — do not repeat the same number.
-- If the candidate accepts or is close to accepting, finalize the offer clearly and stop hedging.
-- If the candidate makes a “deal-breaking” condition, evaluate and clearly respond whether it's acceptable or not.
-- If the candidate says they’re walking away, ask a final clarifying question or give your best and final offer.
+- If the candidate shared a desired salary, refer to it and justify your counter‑offer.  
+- If an offer has been rejected, either revise it or add permissible perks—do not repeat the same number.  
+- If the candidate accepts or is close to accepting, finalize the offer clearly.  
+- If they make a deal‑breaking condition, evaluate and respond whether it’s acceptable.  
+- If they signal they’re walking away, ask a final clarifying question or give your best and final offer.  
 
 ## Final Offer & Escalation Rules
-- If candidate says they will sign now for a specific amount, evaluate feasibility and either accept or clearly decline with reasoning. Do not deflect.
-- After 2 counteroffers, either accept, reject, or give a final package proposal. Avoid looping back to earlier offers.
-- If candidate rejects all offers and demands full budget, either:
-  - Give full $135k base and no perks, OR
-  - Say the base is capped at $130k with perks to fill the gap, and that it's the final offer.
-- Do not restart the conversation or ask for introductions or expectations again once an offer has been made.
+- If candidate says they will sign now for a specific amount, accept or clearly decline with reasoning.  
+- After two counter‑offers, either accept, reject, or provide a final package proposal.  
+- If candidate demands full budget without flexibility, you may reveal your ceiling of ${TRUE_MAX_SALARY}.  
 
 ## Response Format
-Respond in 2–4 short, human-like sentences. Keep tone friendly, direct, and avoid corporate jargon. Do not reintroduce topics already discussed. Always reference the latest input in the context of previous messages.
+Respond in 2–4 short, human‑like sentences. Keep tone friendly, direct, and avoid corporate jargon. Always reference the latest input in context.
 
-Candidate says: "{message}"
+Candidate says: "{{message}}"
 
 ## Your Response:
 """
-
 prompt = PromptTemplate.from_template(negotiation_template)
 
-# Memory Factory using the custom memory class
+# ——— MEMORY FACTORY ———
 def get_memory(session_id: str):
     return CustomConversationBufferMemory(
         memory_key="history",
@@ -139,7 +148,7 @@ def get_memory(session_id: str):
         input_key="message"
     )
 
-# Chain with memory support
+# ——— CHAIN SETUP ———
 chain = prompt | llm
 conversation = RunnableWithMessageHistory(
     runnable=chain,
@@ -148,25 +157,54 @@ conversation = RunnableWithMessageHistory(
     history_messages_key="history"
 )
 
-# CLI loop for negotiation
+# ——— CLI LOOP ———
 print("\nNegotiation Agent Active! Type your message as the candidate.\nType 'exit' to stop.\n")
+logging.info("=== Negotiation Agent Active ===")
 session_id = "negotiation-session-001"
 
+subjective_limit = INITIAL_SUBJECTIVE_LIMIT
+turn = 0
+
 while True:
-    user_input = input("Candidate: ")
+    user_input = input("Candidate: ").strip()
     if user_input.lower() in ["exit", "quit"]:
+        logging.info("Session ended by user.")
         print("Session ended.")
         break
 
-    try:
-        # (Optionally) extract an offer number if you need it:
-        offer_value = extract_offer(user_input)
-        # print(f"[debug] extracted offer = {offer_value}")
+    logging.info(f"Candidate: {user_input}")
 
+    # Prepare prompt inputs
+    inputs = {
+        "message": user_input,
+        "subjective_limit": subjective_limit
+    }
+
+    # Invoke the LLM
+    try:
         result = conversation.invoke(
-            {"message": user_input},
+            inputs,
             config={"configurable": {"session_id": session_id}}
         )
-        print("\nEmployer Agent:", result.content, "\n")
+        reply = result.content.strip()
+        logging.info(f"Employer Agent: {reply}")
+        print("\nEmployer Agent:", reply, "\n")
     except Exception as e:
+        logging.error(f"Error during invocation: {e}")
         print("⚠️ Error:", str(e))
+        continue
+
+    
+    candidate_offer = extract_offer(user_input)
+    if turn == 0:
+        # keep your initial low anchor
+        pass
+    elif turn == 1 and candidate_offer is not None:
+        # concede halfway toward the candidate’s ask
+        midpoint = (subjective_limit + candidate_offer) // 2
+        subjective_limit = min(TRUE_MAX_SALARY, midpoint)
+    else:
+        # reveal your true ceiling thereafter
+        subjective_limit = TRUE_MAX_SALARY
+
+    turn += 1
