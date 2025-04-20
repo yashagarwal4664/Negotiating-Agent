@@ -6,7 +6,7 @@ from langchain.prompts import PromptTemplate
 from langchain.memory import ConversationBufferMemory
 from langchain_core.runnables.history import RunnableWithMessageHistory
 
-# ——— LOGGING CONFIGURATION ———
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s  %(message)s",
@@ -17,7 +17,7 @@ logging.basicConfig(
     ]
 )
 
-# Custom ConversationBufferMemory that implements both `messages` and `add_messages`
+
 class CustomConversationBufferMemory(ConversationBufferMemory):
     @property
     def messages(self):
@@ -27,7 +27,7 @@ class CustomConversationBufferMemory(ConversationBufferMemory):
         # Otherwise, process the internal buffer.
         if isinstance(self.buffer, str):
             return [msg for msg in self.buffer.split("\n") if msg]
-        # Fallback: assume the buffer is already a list.
+        
         return self.buffer
 
     def add_messages(self, messages):
@@ -35,8 +35,7 @@ class CustomConversationBufferMemory(ConversationBufferMemory):
         if hasattr(self, "chat_memory") and hasattr(self.chat_memory, "add_messages"):
             self.chat_memory.add_messages(messages)
         else:
-            # Otherwise update the buffer manually.
-            # Here we assume that messages is a list of objects that are either strings or have a "content" attribute.
+           
             if isinstance(self.buffer, str):
                 for message in messages:
                     text = message if isinstance(message, str) else getattr(message, "content", str(message))
@@ -47,11 +46,11 @@ class CustomConversationBufferMemory(ConversationBufferMemory):
                 # If buffer is in an unexpected format, simply overwrite it.
                 self.buffer = messages
 
-# Load environment variables
+
 load_dotenv()
 api_key = os.getenv("OPENAI_API_KEY")
 
-# LLM Initialization
+
 llm = ChatOpenAI(
     model="llama-3.1-70b-instruct",
     openai_api_base="https://api.ai.it.ufl.edu",
@@ -59,7 +58,7 @@ llm = ChatOpenAI(
     temperature=0.6
 )
 
-# Negotiation prompt template
+
 negotiation_template = """
 ## Dialogue So Far
 {history}
@@ -138,7 +137,7 @@ def get_memory(session_id: str):
         input_key="message"
     )
 
-# Chain with memory support
+
 chain = prompt | llm
 conversation = RunnableWithMessageHistory(
     runnable=chain,
@@ -147,7 +146,7 @@ conversation = RunnableWithMessageHistory(
     history_messages_key="history"
 )
 
-# CLI loop for negotiation
+
 print("\nNegotiation Agent Active! Type your message as the candidate.\nType 'exit' to stop.\n")
 logging.info("=== Negotiation Agent Active ===")
 
