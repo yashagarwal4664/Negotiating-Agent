@@ -1,0 +1,4 @@
+2025-06-13 23:06:20  === Enhanced Negotiation Agent Active ===
+2025-06-13 23:06:23  Candidate (Turn 1): hi
+2025-06-13 23:06:31  HTTP Request: POST https://api.ai.it.ufl.edu/chat/completions "HTTP/1.1 200 OK"
+2025-06-13 23:06:31  Employer Agent (Turn 1, Limit: $115000): "Hello, it's great to finally discuss the compensation package for the position. I'm excited about the possibility of you joining our team. Before we dive in, I want to assure you that we value your skills and experience, and I'm looking forward to finding a mutually beneficial agreement."
