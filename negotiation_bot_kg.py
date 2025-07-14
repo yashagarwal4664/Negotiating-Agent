@@ -8,7 +8,8 @@ import datetime
 from dotenv import load_dotenv
 from typing import List, Optional, Dict, Any
 
-from langchain_openai import ChatOpenAI
+from langchain.chat_models import ChatOpenAI
+
 from langchain.prompts import PromptTemplate
 from langchain.memory import ConversationBufferMemory
 from langchain_core.runnables.history import RunnableWithMessageHistory
