@@ -1,0 +1,6 @@
+langchain
+networkx
+openai
+flask
+python-dotenv
+requests
