@@ -1,3 +1,6 @@
+import subprocess
+print("\n== Installed Packages on Render ==")
+subprocess.run(["pip", "freeze"])
 
 
 import os
