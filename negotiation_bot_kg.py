@@ -1,7 +1,5 @@
 import subprocess
-print("\n== Installed Packages on Render ==")
-subprocess.run(["pip", "freeze"])
-
+subprocess.run(["pip", "install", "langchain-openai"])
 
 import os
 import re
